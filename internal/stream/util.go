@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -138,4 +139,30 @@ func CacheFullInTempFileAndHash(stream model.FileStreamer, hashType *utils.HashT
 		return nil, "", err
 	}
 	return tmpF, hex.EncodeToString(h.Sum(nil)), err
+}
+
+type StreamSectionReader struct {
+	Stream model.FileStreamer
+	off    int64
+}
+
+func (ss *StreamSectionReader) GetSectionReader(off, length int64) (model.NopMFileIF, error) {
+	var cache io.ReaderAt = ss.Stream.GetFile()
+	if cache == nil {
+		if off != ss.off {
+			return nil, fmt.Errorf("stream not cached: request offset %d != current offset %d", off, ss.off)
+		}
+		buf := make([]byte, length)
+		n, err := io.ReadFull(ss.Stream, buf)
+		if err != nil {
+			return nil, err
+		}
+		if int64(n) != length {
+			return nil, fmt.Errorf("stream read did not get all data, expect =%d ,actual =%d", length, n)
+		}
+		ss.off += int64(n)
+		off = 0
+		cache = bytes.NewReader(buf)
+	}
+	return io.NewSectionReader(cache, off, length), nil
 }
